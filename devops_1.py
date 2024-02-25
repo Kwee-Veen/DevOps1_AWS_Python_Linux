@@ -1,12 +1,11 @@
 # TODO: Logging. Print to the console (or log to a file) details of what is happening, including errors.
 # TODO: Robustness & testing. Your code should do appropriate error handling (using exceptions) and output meaningful messages
 
-
-import boto3, time, webbrowser, json
+import boto3, webbrowser, time, json, requests, uuid
 ec2 = boto3.resource('ec2')
+
+# Creating ec2 instance with UserData script to initiate apache server, displaying current instance metadata
 new_instances = ec2.create_instances(
-  # Note: ImageId from time to time becomes out of date. Please update; the current
-  # ami can be found when launching an instance via the AWS web console.
   ImageId = 'ami-0440d3b780d96b29d',
   MinCount = 1,
   MaxCount = 1,
@@ -49,39 +48,57 @@ new_instances = ec2.create_instances(
   sudo mv index.html /var/www/html/index.html >> index.html
   """
 )
-
 print (new_instances[0].id)
-new_instances[0].wait_until_running()
-new_instances[0].reload()
-inst0_ip = new_instances[0].public_ip_address
-print ("Instance Running. Public IPv4 Address: " + inst0_ip)
 
-
-# TODO: Step 4, create S3 bucket here; have one wait period, then both are opened at the same time.
-
+# Creating s3 bucket
 s3 = boto3.resource("s3")
-now = time.strftime("%H.%M.%S", time.localtime())
-bucketName = (f'big-ole-bucket-made-at-{now}')
+bigRandom = uuid.uuid4()
+bigRandomString = str(bigRandom)
+randomSixCharacters = bigRandomString[0:6]
+bucketName = (f'{randomSixCharacters}-carnott')
 try:
     response = s3.create_bucket(Bucket=(f'{bucketName}'))
     print (response)
 except Exception as error:
     print (error)
 
+# Saving logo.jpg locally
+img_url = 'http://devops.witdemo.net/logo.jpg'
+path = 'logo.jpg'
+response = requests.get(img_url)
+if response.status_code == 200:
+    with open(path, 'wb') as f:
+        f.write(response.content)
+
+# Pushing logo.jpg to the s3 bucket
+try:
+    s3.Object(bucketName, "logo.jpg").put(Body=open("logo.jpg", 'rb'), ContentType="image/jpeg")
+    print (f'Saved logo.jpg to {bucketName}')
+except Exception as error:
+    print (error)
+
+# Creating index.html file
+print ('<!DOCTYPE html>', file=open('index.html', 'w'))
+print ('<html>', file=open('index.html', 'a'))
+print ('<img src="logo.jpg" alt="SETU Logo">', file=open('index.html', 'a'))
+print ('</html>', file=open('index.html', 'a'))
+
+# Pushing index.html to the s3 bucket
+try:
+    s3.Object(bucketName, "index.html").put(Body=open("index.html", 'rb'), ContentType="text/html")
+    print (f'Saved index.html to {bucketName}')
+except Exception as error:
+    print (error)
+
+# Configuring s3 bucket to use index.html
 website_configuration = {
     'ErrorDocument': {'Key': 'error.html'},
     'IndexDocument': {'Suffix': 'index.html'},
 }
-
 bucket_website = s3.BucketWebsite(f'{bucketName}')
 response = bucket_website.put(WebsiteConfiguration=website_configuration)
 
-# TODO: push an index.html file to the s3 bucket
-# <img> tag > index.html   ....   then grab the code to push that to the s3 bucket.
-# I'm assuming this has to be done before you invoke the below policy change, but if it doesn't work, put this after the policy change, or experiment with waiters
-
-# TODO: use subprocess.run or something to download the image, then some code to upload it to the bucket. Implement this after the above TODO though.
-
+# Deleting s3 bucket's public access block, creating & uploading a new policy permitting public traffic
 s3client = boto3.client("s3")
 s3client.delete_public_access_block(Bucket=(f'{bucketName}'))
 bucket_policy = {
@@ -98,20 +115,40 @@ bucket_policy = {
 }
 s3.Bucket(f'{bucketName}').Policy().put(Policy=json.dumps(bucket_policy))
 print ("s3 Policy amended")
-time.sleep(2)
+time.sleep(1)
 
-# Consider opening both sites at the same time? Particularly if waiting is needed for s3 image upload etc.
-
+# Opening s3 bucket endpoint in browser
 print (f'Opening {bucketName} endpoint in browser')
 s3_endpoint = f'http://{bucketName}.s3-website-us-east-1.amazonaws.com'
 webbrowser.open_new_tab(s3_endpoint)
 
+# Saving s3 bucket link to a local file
+print (f'Saving {s3_endpoint} link to local file "carnott-websites.txt"')
+print ('Generated s3 bucket link:', file=open('carnott-websites.txt', 'w'))
+print (s3_endpoint, file=open('carnott-websites.txt', 'a'))
 
-# TODO: Step 5, write URLs of both EC2 & S3 to a file called carnott-websites.txt.
-#       Then time.sleep(25) -> open both URLs in browser, showing both images.
-print ("Waiting 25 sec for ec2 installation to complete")
-time.sleep(25)
-print ("Launching ec2 static website in browser")
+# TODO: Step 6, scp the monitoring script to the ec2 instance
+
+# TODO: SSH remote command execute to set the correct permissions to run the script, then execute the script.
+# Then wait a few more secs for the upload / set permissions / execute, then open browser tab.
+
+# Waiting until ec2 instance is running, then saving the IPv4 address as inst0_ip
+print ("Waiting until ec2 instance is running")
+new_instances[0].wait_until_running()
+new_instances[0].reload()
+inst0_ip = new_instances[0].public_ip_address
+print ("EC2 instance running. Public IPv4 Address: " + inst0_ip)
+
+# Saving ec2 instance link to a local file
 apache_url = 'http://' + inst0_ip
-webbrowser.open_new_tab(apache_url)
+print (f'Saving {apache_url} link to local file "carnott-websites.txt"')
+print ('Generated ec2 instance link:', file=open('carnott-websites.txt', 'a'))
+print (apache_url, file=open('carnott-websites.txt', 'a'))
 
+# Waiting for ec2 installation completion
+print ("Waiting 35 sec for ec2 installation to complete")
+time.sleep(35)
+
+# Opening ec2 instance link in browser
+print ("Launching ec2 static website in browser")
+webbrowser.open_new_tab(apache_url)
