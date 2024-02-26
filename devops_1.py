@@ -1,7 +1,7 @@
 # TODO: Logging. Print to the console (or log to a file) details of what is happening, including errors.
 # TODO: Robustness & testing. Your code should do appropriate error handling (using exceptions) and output meaningful messages
 
-import boto3, webbrowser, time, json, requests, uuid
+import boto3, webbrowser, time, json, requests, uuid, subprocess
 ec2 = boto3.resource('ec2')
 
 # Creating ec2 instance with UserData script to initiate apache server, displaying current instance metadata
@@ -127,11 +127,6 @@ print (f'Saving {s3_endpoint} link to local file "carnott-websites.txt"')
 print ('Generated s3 bucket link:', file=open('carnott-websites.txt', 'w'))
 print (s3_endpoint, file=open('carnott-websites.txt', 'a'))
 
-# TODO: Step 6, scp the monitoring script to the ec2 instance
-
-# TODO: SSH remote command execute to set the correct permissions to run the script, then execute the script.
-# Then wait a few more secs for the upload / set permissions / execute, then open browser tab.
-
 # Waiting until ec2 instance is running, then saving the IPv4 address as inst0_ip
 print ("Waiting until ec2 instance is running")
 new_instances[0].wait_until_running()
@@ -148,6 +143,23 @@ print (apache_url, file=open('carnott-websites.txt', 'a'))
 # Waiting for ec2 installation completion
 print ("Waiting 35 sec for ec2 installation to complete")
 time.sleep(35)
+
+# Copy the monitoring.sh script to the ec2 instance via scp
+print (f'Copying monitoring.sh to {inst0_ip}')
+ec2_ipv4 = f'ec2-user@{inst0_ip}'
+scp_cmd = f'scp -o StrictHostKeyChecking=no -i carnottKey.pem monitoring.sh {ec2_ipv4}:.'
+subprocess.call(scp_cmd.split())
+
+# Modify monitoring.sh in the ec2 instance via ssh remote command execution
+print (f'Changing monitoring.sh permissions in {inst0_ip}')
+ssh_permissions_command = "chmod 700 monitoring.sh"
+ssh_permissions_full = f'ssh -i carnottKey.pem {ec2_ipv4} {ssh_permissions_command}'
+subprocess.call(ssh_permissions_full.split())
+
+# Execute monitoring.sh in the ec2 instance via ssh remote command execution
+print (f'Executing monitoring.sh in {inst0_ip}:')
+ssh_execute = f'ssh -i carnottKey.pem {ec2_ipv4} "./monitoring.sh"'
+subprocess.call(ssh_execute.split())
 
 # Opening ec2 instance link in browser
 print ("Launching ec2 static website in browser")
